@@ -1,4 +1,24 @@
-# Python中使用协程实现并发
+# Python协程并发原理
+
+## 摘要
+
+今天给大家分享一个主题：Python协程并发原理，会用具体的代码演示如何控制并发。
+
+Python中并发有多种实现方式：最常用的是多线程和多进程，还有基于事件循环的twisted和tornado。另外还有协程。
+其中协程也有多种实现：比如greenlet/stackless, 今天主要介绍python中原生的yield和async/await实现。
+
+# 概念
+
+* concurrency: 同时存在，同时发生 [wikipedia](https://en.wikipedia.org/wiki/Concurrenc…)
+* parallelism: 完成并发的一种方式，通常指多个CPU同时执行
+* coroutine: A coroutine is a generalization of a subroutine which can be paused at some point and returns a value. When the coroutine is called again, it is resumed right from the point it was paused and its environment remains intact.
+* multiplexing I/O: 多个模拟或者数字信号数据流被合并到同一个共享媒介中，目标是共享昂贵的资源
+
+协程就是当一个函数「返回」时仍然保存它返回时的状态(局部作用域的变量，以及下一步要执行的操作)。这样允许协程下一次被调用时直接进入它上次放回时的状态。这种形式的「返回」通常称为yielding。
+
+[Understanding Asynchronous IO](https://blog.xiaoba.me/2014/10/17/trans-understanding-asynchronous-io-with-python-asyncio-and-nodejs.html)
+
+# 原理和目标
 
 ## 操作系统的I/O模型介绍
 
@@ -42,8 +62,7 @@ select.select([stdin.fileno()], [], [], 5); stdin.read()
 
 ### 异步I/O
 
-最后，异步非阻塞 I/O 模型是一种处理与 I/O 重叠进行的模型。读请求会立即返回，说明 read 请求已经成功发起了。在后台完成读操作时，应用程序然后会执行其他处理操作。当 read 的响应到达时，就会产生一个信号或执行一个基于线程的回调函数来完成这次 I/O 处理过程。
-
+异步非阻塞 I/O 模型是一种处理与 I/O 重叠进行的模型。读请求会立即返回，说明 read 请求已经成功发起了。在后台完成读操作时，应用程序然后会执行其他处理操作。当 read 的响应到达时，就会产生一个信号或执行一个基于线程的回调函数来完成这次 I/O 处理过程。
 
 ### 理解同步、异步、阻塞、非阻塞之间的区别
 
@@ -70,7 +89,7 @@ get_data(callback=handle_data)
 * 阻塞调用是指调用结果返回之前，当前线程会被挂起。调用线程只有在得到结果之后才会返回。
 * 非阻塞调用指在不能立刻得到结果之前，该调用不会阻塞当前线程。
 
-## 同步非阻塞编程模型
+## 目标：同步非阻塞编程模型
 
 对于开发人员来说，需要一个好的同步非阻塞编程模型，当然，这个模型可以构建在操作系统的任意I/O操作之上。
 
@@ -80,11 +99,38 @@ get_data(callback=handle_data)
 
 provides infrastructure for writing single-threaded concurrent code using coroutines, multiplexing I/O access over sockets and other resources
 
-一些概念：
+## 演变
 
-* concurrency: 同时存在，同时发生 [wikipedia](https://en.wikipedia.org/wiki/Concurrenc…)
-* parallelism: 完成并发的一种方式，通常指多个CPU同时执行
-* coroutine: A coroutine is a generalization of a subroutine which can be paused at some point and returns a value. When the coroutine is called again, it is resumed right from the point it was paused and its environment remains intact.
-* multiplexing I/O: 多个模拟或者数字信号数据流被合并到同一个共享媒介中，目标是共享昂贵的资源
+### echoserver
 
-### 演示
+1. 单线程阻塞
+2. 多线程
+3. ThreadPoolExecutor
+4. selector + callback
+5. selector + yield
+6. selector + async/await
+7. curio
+
+```
+from time import sleep
+
+def countdown(name, n):
+     for i in range(n, 0, -1):
+         print(f'{name} 倒计时: {i}秒')
+         sleep(1)
+         yield
+     print(name, '发射')
+
+def run(*tasks):
+    q = list(tasks)
+    while q:
+        task = q.pop(0)
+        try:
+            next(task)
+        except StopIteration:
+            continue
+        else:
+            q.append(task)
+
+run(countdown('神州十一号', 5), countdown('天宫二号', 10))
+```
